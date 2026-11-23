@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Signaux Or &amp; BTC</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#262d37; --txt:#e6edf3; --mut:#8b949e; --up:#2ea043; --dn:#f85149; --gold:#e3b341; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; padding:env(safe-area-inset-top) 14px 30px; }
+  header { display:flex; justify-content:space-between; align-items:flex-end; padding:16px 0 10px; }
+  h1 { font-size:18px; margin:0; color:var(--gold); }
+  .price { font-size:28px; font-weight:700; }
+  .mut { color:var(--mut); font-size:12px; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .tabs button { background:var(--card); color:var(--mut); border:1px solid var(--line); border-radius:20px; padding:8px 16px; font-size:14px; font-weight:600; }
+  .tabs button.on { color:#0d1117; background:var(--gold); border-color:var(--gold); }
+  .tabs .sp { flex:1; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; gap:8px; }
+  .row > div { flex:1; text-align:center; }
+  .big { font-size:20px; font-weight:700; }
+  .buy { color:var(--up); } .sell { color:var(--dn); }
+  .badge { display:inline-block; padding:4px 10px; border-radius:20px; font-weight:700; font-size:13px; }
+  .badge.buy { background:rgba(46,160,67,.18); } .badge.sell { background:rgba(248,81,73,.18); }
+  .sig-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .lvls { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center; }
+  .lvls b { display:block; font-size:17px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:18px 0 8px; }
+  svg { width:100%; height:auto; display:block; }
+  .hist { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--line); font-size:14px; }
+  .hist:first-child { border-top:0; }
+  .res { font-weight:700; font-size:12px; padding:3px 8px; border-radius:8px; }
+  .res.TP { background:rgba(46,160,67,.2); color:var(--up); }
+  .res.SL { background:rgba(248,81,73,.2); color:var(--dn); }
+  .res.EC { background:var(--line); color:var(--mut); }
+  .empty { text-align:center; color:var(--mut); padding:30px 10px; line-height:1.6; }
+  .note { font-size:11px; color:var(--mut); line-height:1.5; margin-top:16px; }
+  #banner { display:none; position:sticky; top:8px; z-index:5; padding:14px; border-radius:12px; font-weight:700; text-align:center; margin-bottom:10px; }
+  #banner.buy { display:block; background:var(--up); color:#fff; }
+  #banner.sell { display:block; background:var(--dn); color:#fff; }
+  .alert-btn { width:100%; background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:14px; margin-bottom:12px; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>🟡 SIGNAUX</h1><div class="mut" id="upd">Chargement…</div></div>
+  <div style="text-align:right"><div class="price" id="price">–</div><div class="mut" id="trend"></div></div>
+</header>
+
+<div id="banner"></div>
+
+<div class="tabs">
+  <button id="b-PAXGUSDT" class="on">OR</button>
+  <button id="b-BTCUSDT">BTC</button>
+  <span class="sp"></span>
+  <button id="b-5m" class="on">M5</button>
+  <button id="b-15m">M15</button>
+</div>
+
+<button class="alert-btn" id="alertBtn">🔔 Activer son + vibration + notification</button>
+
+<div id="app"><div class="empty">Chargement des données…</div></div>
+
+<p class="note">
+  Garde cette page ouverte pour recevoir les signaux (elle ne peut pas tourner en arrière-plan).
+  Source des prix : Binance (OR = PAXG, jeton adossé à l'or, quelques dollars d'écart avec le XAUUSD de MT5 : utilise les <b>distances</b> SL/TP plutôt que les niveaux bruts).
+  Les statistiques portent sur la période affichée seulement et ne garantissent rien.
+</p>
+
+<script>
+// ======== RÉGLAGES ========
+const ATR_LEN = 10, MULT = 3.0, EMA_LEN = 200, SL_ATR = 1.5, RR = 1.5;
+
+// CORE START
+function compute(k) {
+  const n = k.length, a = 1 / ATR_LEN, e = 2 / (EMA_LEN + 1);
+  const atr = new Array(n), ema = new Array(n), dir = new Array(n), st = new Array(n);
+  const fu = new Array(n), fl = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const pc = i ? k[i - 1].c : k[i].c;
+    const tr = Math.max(k[i].h - k[i].l, Math.abs(k[i].h - pc), Math.abs(k[i].l - pc));
+    atr[i] = i ? a * tr + (1 - a) * atr[i - 1] : tr;
+    ema[i] = i ? e * k[i].c + (1 - e) * ema[i - 1] : k[i].c;
+    const hl2 = (k[i].h + k[i].l) / 2;
+    const ub = hl2 + MULT * atr[i], lb = hl2 - MULT * atr[i];
+    if (i === 0) { fu[i] = ub; fl[i] = lb; dir[i] = 1; }
+    else {
+      fu[i] = (ub < fu[i - 1] || k[i - 1].c > fu[i - 1]) ? ub : fu[i - 1];
+      fl[i] = (lb > fl[i - 1] || k[i - 1].c < fl[i - 1]) ? lb : fl[i - 1];
+      if (dir[i - 1] === -1 && k[i].c > fu[i - 1]) dir[i] = 1;
+      else if (dir[i - 1] === 1 && k[i].c < fl[i - 1]) dir[i] = -1;
+      else dir[i] = dir[i - 1];
+    }
+    st[i] = dir[i] === 1 ? fl[i] : fu[i];
+  }
+  return { atr, ema, dir, st };
+}
+
+function findSignals(k, m) {
+  const out = [];
+  for (let i = 100; i < k.length; i++) {
+    const p = k[i].c;
+    let side = null;
+    if (m.dir[i] === 1 && m.dir[i - 1] === -1 && p > m.ema[i]) side = 'BUY';
+    if (m.dir[i] === -1 && m.dir[i - 1] === 1 && p < m.ema[i]) side = 'SELL';
+    if (!side) continue;
+    const d = m.atr[i] * SL_ATR;
+    const sl = side === 'BUY' ? p - d : p + d;
+    const tp = side === 'BUY' ? p + d * RR : p - d * RR;
+    let result = 'EN COURS';
+    for (let j = i + 1; j < k.length; j++) {
+      const hitSl = side === 'BUY' ? k[j].l <= sl : k[j].h >= sl;
+      const hitTp = side === 'BUY' ? k[j].h >= tp : k[j].l <= tp;
+      if (hitSl) { result = 'SL'; break; }   // prudent : SL prioritaire
+      if (hitTp) { result = 'TP'; break; }
+    }
+    out.push({ side, t: k[i].t, entry: p, sl, tp, dist: d, result, idx: i });
+  }
+  return out;
+}
+// CORE END
+
+// ======== INTERFACE ========
+let symbol = 'PAXGUSDT', tf = '5m', timer = null, soundOn = false;
+const TZ = 'Africa/Casablanca';
+const fmtTime = ms => new Date(ms).toLocaleString('fr-FR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const n2 = v => Number(v).toFixed(2);
+const $ = id => document.getElementById(id);
+const HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com'];
+
+function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) { return null; } }
+
+async function getKlines() {
+  let err;
+  for (const h of HOSTS) {
+    try {
+      const r = await fetch(h + '/api/v3/klines?symbol=' + symbol + '&interval=' + tf + '&limit=500');
+      if (!r.ok) throw new Error('http ' + r.status);
+      const raw = await r.json();
+      return raw.slice(0, -1).map(x => ({ t: x[0], h: +x[2], l: +x[3], c: +x[4] })); // retire la bougie en cours
+    } catch (e) { err = e; }
+  }
+  throw err;
+}
+
+function chart(k, m, sigs) {
+  const N = 120, W = 340, H = 170, P = 6, s0 = Math.max(0, k.length - N), len = k.length - s0;
+  const vals = [];
+  for (let i = s0; i < k.length; i++) vals.push(k[i].c, m.st[i], m.ema[i]);
+  const mn = Math.min(...vals), mx = Math.max(...vals), span = (mx - mn) || 1;
+  const x = i => P + (i - s0) * (W - 2 * P) / (len - 1);
+  const y = v => H - P - (v - mn) / span * (H - 2 * P);
+  const line = (get, col, w) => {
+    let pts = [];
+    for (let i = s0; i < k.length; i++) pts.push(x(i).toFixed(1) + ',' + y(get(i)).toFixed(1));
+    return '<polyline fill="none" stroke="' + col + '" stroke-width="' + w + '" points="' + pts.join(' ') + '"/>';
+  };
+  let marks = '';
+  sigs.forEach(s => {
+    if (s.idx < s0) return;
+    const col = s.side === 'BUY' ? '#2ea043' : '#f85149', cy = y(s.entry), cx = x(s.idx);
+    const pts = s.side === 'BUY' ? [cx, cy + 2, cx - 5, cy + 12, cx + 5, cy + 12] : [cx, cy - 2, cx - 5, cy - 12, cx + 5, cy - 12];
+    marks += '<polygon fill="' + col + '" points="' + pts.map(v => v.toFixed(1)).join(' ') + '"/>';
+  });
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '">' + line(i => m.ema[i], '#e3b341', 1.2) + line(i => m.st[i], '#58a6ff', 1.2) + line(i => k[i].c, '#e6edf3', 1.6) + marks + '</svg>' +
+    '<div class="mut" style="margin-top:6px"><span style="color:#e6edf3">━</span> Prix &nbsp; <span style="color:#58a6ff">━</span> SuperTrend &nbsp; <span style="color:#e3b341">━</span> EMA 200</div>';
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.25, 0.5].forEach(d => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.25, ctx.currentTime + d); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + d + 0.2);
+      o.start(ctx.currentTime + d); o.stop(ctx.currentTime + d + 0.2);
+    });
+  } catch (e) {}
+}
+
+function maybeAlert(s, tfMin) {
+  const ageMin = (Date.now() - s.t) / 60000 - tfMin; // la bougie est fermée depuis ...
+  const key = 'last-' + symbol + '-' + tf;
+  const id = s.side + s.t;
+  if (ageMin > 15 || store(key) === id) return;
+  store(key, id);
+  const label = (s.side === 'BUY' ? '▲ ACHAT ' : '▼ VENTE ') + (symbol === 'BTCUSDT' ? 'BTC' : 'OR') + ' ' + n2(s.entry) + ' | SL ' + n2(s.dist) + ' | TP ' + n2(s.dist * RR);
+  const b = $('banner'); b.className = s.side === 'BUY' ? 'buy' : 'sell'; b.textContent = label;
+  b.onclick = () => { b.className = ''; };
+  if (soundOn) {
+    beep();
+    if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+    try { if (window.Notification && Notification.permission === 'granted') new Notification('Signal ' + s.side, { body: label }); } catch (e) {}
+  }
+}
+
+function render(k, m, sigs) {
+  const last = k.length - 1, tfMin = tf === '5m' ? 5 : 15;
+  $('price').textContent = n2(k[last].c);
+  const tr = $('trend');
+  tr.textContent = (m.dir[last] === 1 ? 'HAUSSIER' : 'BAISSIER') + (k[last].c > m.ema[last] ? ' · au-dessus EMA' : ' · sous EMA');
+  tr.style.color = m.dir[last] === 1 ? 'var(--up)' : 'var(--dn)';
+  $('upd').textContent = 'Mis à jour ' + new Date().toLocaleTimeString('fr-FR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const list = sigs.slice().reverse(), s = list[0];
+  let html = '';
+  if (s) {
+    const cls = s.side === 'BUY' ? 'buy' : 'sell', fresh = (Date.now() - s.t) / 60000;
+    html += '<h2>Dernier signal</h2><div class="card"><div class="sig-top"><span class="badge ' + cls + '">' + (s.side === 'BUY' ? '▲ ACHAT' : '▼ VENTE') + '</span>' +
+      '<span class="mut">' + fmtTime(s.t) + (fresh > 45 ? ' · ancien' : ' · récent') + '</span></div>' +
+      '<div class="lvls"><div><span class="mut">Entrée</span><b>' + n2(s.entry) + '</b></div>' +
+      '<div><span class="mut">Stop-loss</span><b class="sell">' + n2(s.sl) + '</b><span class="mut">' + n2(s.dist) + ' $</span></div>' +
+      '<div><span class="mut">Take-profit</span><b class="buy">' + n2(s.tp) + '</b><span class="mut">' + n2(s.dist * RR) + ' $</span></div></div></div>';
+  } else html += '<div class="card empty">Aucun signal sur la période</div>';
+
+  const closed = sigs.filter(g => g.result !== 'EN COURS'), tp = closed.filter(g => g.result === 'TP').length;
+  const hours = Math.round(k.length * tfMin / 60);
+  html += '<h2>Statistiques (~' + hours + ' h)</h2><div class="card row">' +
+    '<div><div class="big">' + closed.length + '</div><div class="mut">Clos</div></div>' +
+    '<div><div class="big buy">' + tp + '</div><div class="mut">TP</div></div>' +
+    '<div><div class="big sell">' + (closed.length - tp) + '</div><div class="mut">SL</div></div>' +
+    '<div><div class="big">' + (closed.length ? Math.round(100 * tp / closed.length) + '%' : '–') + '</div><div class="mut">Réussite</div></div></div>';
+
+  html += '<h2>Graphique</h2><div class="card">' + chart(k, m, sigs) + '</div><h2>Historique</h2><div class="card">';
+  if (!list.length) html += '<div class="empty">Rien à afficher</div>';
+  list.slice(0, 30).forEach(g => {
+    const cls = g.side === 'BUY' ? 'buy' : 'sell', r = g.result === 'EN COURS' ? 'EC' : g.result;
+    html += '<div class="hist"><div><b class="' + cls + '">' + (g.side === 'BUY' ? '▲ ACHAT' : '▼ VENTE') + '</b> ' + n2(g.entry) +
+      '<div class="mut">' + fmtTime(g.t) + '</div></div><span class="res ' + r + '">' + g.result + '</span></div>';
+  });
+  $('app').innerHTML = html + '</div>';
+  if (s) maybeAlert(s, tfMin);
+}
+
+async function load() {
+  try {
+    const k = await getKlines();
+    const m = compute(k);
+    render(k, m, findSignals(k, m));
+  } catch (e) {
+    $('app').innerHTML = '<div class="empty">Impossible de joindre le serveur de prix.<br>Vérifie ta connexion (ou essaie sans VPN).</div>';
+  }
+}
+
+function start() { clearInterval(timer); load(); timer = setInterval(load, 20000); }
+function pick(group, id, setter) {
+  group.forEach(g => $('b-' + g).classList.toggle('on', g === id));
+  setter(id); start();
+}
+['PAXGUSDT', 'BTCUSDT'].forEach(s => $('b-' + s).onclick = () => pick(['PAXGUSDT', 'BTCUSDT'], s, v => symbol = v));
+['5m', '15m'].forEach(t => $('b-' + t).onclick = () => pick(['5m', '15m'], t, v => tf = v));
+$('alertBtn').onclick = async () => {
+  soundOn = true; beep();
+  try { if (window.Notification && Notification.permission === 'default') await Notification.requestPermission(); } catch (e) {}
+  $('alertBtn').textContent = '🔔 Alertes activées (garde la page ouverte)';
+};
+start();
+</script>
+</body>
+</html>
